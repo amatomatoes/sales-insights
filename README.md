@@ -4,7 +4,7 @@
 
 Most small shops and cafés have months of sales data sitting in their point-of-sale system, but no time or tools to make sense of it. Sales Insights lets an owner upload a sales export and instantly see what's selling, when they're busiest, and what's changing, with clear, actionable tips instead of raw numbers.
 
-🔗 **Live demo:** _coming soon_
+🔗 **Live demo:** [amatus-sales-insights.streamlit.app](https://amatus-sales-insights.streamlit.app/)
 
 ## What it does
 
