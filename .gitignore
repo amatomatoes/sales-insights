@@ -1,0 +1,13 @@
+# Virtual environment (each computer makes its own)
+.venv/
+venv/
+
+# Python cache files
+__pycache__/
+*.pyc
+
+# PyCharm settings
+.idea/
+
+# Mac system files
+.DS_Store
