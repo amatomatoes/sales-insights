@@ -92,12 +92,12 @@ with tab_products:
         title="Revenue by product",
     )
     fig.update_layout(height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     st.dataframe(
         products.rename(columns={"product": "Product", "revenue": "Revenue ($)",
                                  "units": "Units sold", "share": "% of revenue"}),
-        hide_index=True, use_container_width=True,
+        hide_index=True, width="stretch",
         column_config={
             "Revenue ($)": st.column_config.NumberColumn(format="$%.0f"),
             "% of revenue": st.column_config.NumberColumn(format="%.1f%%"),
@@ -112,20 +112,20 @@ with tab_times:
         labels={"x": "Hour", "y": "", "color": "Avg revenue ($)"},
         title="Average revenue by day and hour (darker = busier)",
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     by_day = analysis.revenue_by_weekday(df).reset_index()
     fig = px.bar(by_day, x="weekday", y="total",
                  labels={"weekday": "", "total": "Average revenue ($)"},
                  title="Average revenue by day of the week")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
 with tab_trends:
     weekly = analysis.weekly_revenue(df).reset_index()
     fig = px.line(weekly, x="datetime", y="total", markers=True,
                   labels={"datetime": "Week", "total": "Revenue ($)"},
                   title="Weekly revenue")
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
 
     trends = analysis.product_trends(df).reset_index()
     trends["direction"] = trends["change_pct"].apply(
@@ -139,4 +139,4 @@ with tab_trends:
         title="Product trends: last 4 weeks vs. first 4 weeks",
     )
     fig.update_layout(height=500)
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, width="stretch")
