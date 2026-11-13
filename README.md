@@ -6,8 +6,6 @@ Most small shops and cafés have months of sales data sitting in their point-of-
 
 🔗 **Live demo:** _coming soon_
 
-![Screenshot of the dashboard](screenshot.png)
-
 ## What it does
 
 - **Headline numbers:** total revenue, number of sales, average sale and revenue per day
@@ -28,7 +26,7 @@ Most small shops and cafés have months of sales data sitting in their point-of-
 ## Run it yourself
 
 ```bash
-git clone https://github.com/YOUR-USERNAME/sales-insights.git
+git clone https://github.com/amatomatoes/sales-insights.git
 cd sales-insights
 pip install -r requirements.txt
 streamlit run app.py
