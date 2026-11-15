@@ -9,12 +9,15 @@ Run it from PyCharm's Terminal with:   streamlit run app.py
 
 from pathlib import Path
 
+import pandas as pd
 import plotly.express as px
 import streamlit as st
 
 import analysis
+import loader
 
 SAMPLE_FILE = Path(__file__).parent / "sample_cafe_sales.csv"
+NOT_IN_FILE = "— not in my file —"
 
 # ---------------------------------------------------------------------------
 # Page setup
@@ -31,32 +34,78 @@ st.caption("Upload your sales data and see what's selling, when you're busy, "
 with st.sidebar:
     st.header("Your data")
     uploaded = st.file_uploader("Upload a sales CSV", type="csv")
-    st.markdown(
-        "**Required columns:** `transaction_id`, `datetime`, `product`, "
-        "`quantity`, `total`"
-    )
+    st.caption("Works with sales exports from Square, Shopify, Clover and most "
+               "other point-of-sale systems.")
     st.divider()
     st.caption("No file? The app shows a demo café's data until you upload one.")
 
-# Use the uploaded file if there is one, otherwise the demo data.
+# ---------------------------------------------------------------------------
+# Step 1: read the file (the upload, or the demo data)
+# ---------------------------------------------------------------------------
+if uploaded is None:
+    raw = loader.read_file(SAMPLE_FILE)
+    source = "demo café data"
+    file_key = "demo"
+else:
+    try:
+        raw = loader.read_file(uploaded)
+    except Exception:
+        st.error("Sorry, we couldn't open that file. Make sure it's a CSV export "
+                 "of your sales.")
+        st.stop()
+    source = uploaded.name
+    # A unique key per file, so the column choices reset when a new file arrives.
+    file_key = f"{uploaded.name}-{uploaded.size}"
+
+# ---------------------------------------------------------------------------
+# Step 2: match the columns (guessed automatically, owner can fix them)
+# ---------------------------------------------------------------------------
+mapping = loader.guess_columns(raw)
+
+if uploaded is not None:
+    needs_help = bool(loader.missing_required(mapping))
+    with st.expander("🔎 Column matching: check that we read your file correctly",
+                     expanded=needs_help):
+        if needs_help:
+            st.warning("We couldn't find everything automatically. Please choose "
+                       "the matching columns below.")
+        else:
+            st.caption("We matched your columns automatically. Change any that look wrong.")
+
+        options = [NOT_IN_FILE] + list(raw.columns)
+        left, right = st.columns(2)
+        for i, (field, info) in enumerate(loader.FIELDS.items()):
+            guess = mapping[field]
+            index = options.index(guess) if guess in options else 0
+            label = info["label"] + (" *" if info["required"] else "")
+            box = left if i % 2 == 0 else right
+            choice = box.selectbox(label, options, index=index, key=f"{file_key}-{field}")
+            mapping[field] = None if choice == NOT_IN_FILE else choice
+
+        st.caption("\\* Required. You also need either a line total or a unit price.")
+        st.markdown("**First rows of your file:**")
+        st.dataframe(raw.head(5), hide_index=True)
+
+# ---------------------------------------------------------------------------
+# Step 3: clean the data into our standard format
+# ---------------------------------------------------------------------------
 try:
-    if uploaded is not None:
-        df = analysis.load_sales(uploaded)
-        source = uploaded.name
-    else:
-        df = analysis.load_sales(SAMPLE_FILE)
-        source = "demo café data"
+    df, notes = loader.standardize(raw, mapping)
 except ValueError as error:
-    # load_sales raises ValueError when columns are missing.
     st.error(str(error))
     st.stop()
 except Exception:
-    st.error("Sorry, we couldn't read that file. Make sure it's a CSV export of your sales.")
+    st.error("Sorry, something in this file couldn't be read. Check the column "
+             "matching above.")
     st.stop()
+
+has_time = loader.has_time_of_day(df)
 
 metrics = analysis.summary_metrics(df)
 st.info(f"Showing **{source}** from {metrics['first_date']:%b %d, %Y} "
         f"to {metrics['last_date']:%b %d, %Y}.")
+for note in notes:
+    st.caption(f"ℹ️ {note}")
 
 # ---------------------------------------------------------------------------
 # Headline numbers
@@ -85,13 +134,17 @@ tab_products, tab_times, tab_trends = st.tabs(
 
 with tab_products:
     products = analysis.product_performance(df).reset_index()
+    # Real shops can have hundreds of items, so the chart shows the top 15
+    # and the table below lists everything.
+    top_products = products.head(15)
+    title = "Revenue by product" if len(products) <= 15 else "Top 15 products by revenue"
     fig = px.bar(
-        products.sort_values("revenue"),
+        top_products.sort_values("revenue"),
         x="revenue", y="product", orientation="h",
         labels={"revenue": "Revenue ($)", "product": ""},
-        title="Revenue by product",
+        title=title,
     )
-    fig.update_layout(height=500)
+    fig.update_layout(height=max(300, 32 * len(top_products)))
     st.plotly_chart(fig, width="stretch")
 
     st.dataframe(
@@ -105,14 +158,18 @@ with tab_products:
     )
 
 with tab_times:
-    heat = analysis.busy_times(df)
-    heat.columns = [analysis._fmt_hour(h) for h in heat.columns]
-    fig = px.imshow(
-        heat, text_auto=".0f", aspect="auto", color_continuous_scale="Blues",
-        labels={"x": "Hour", "y": "", "color": "Avg revenue ($)"},
-        title="Average revenue by day and hour (darker = busier)",
-    )
-    st.plotly_chart(fig, width="stretch")
+    if has_time:
+        heat = analysis.busy_times(df)
+        heat.columns = [analysis._fmt_hour(h) for h in heat.columns]
+        fig = px.imshow(
+            heat, text_auto=".0f", aspect="auto", color_continuous_scale="Blues",
+            labels={"x": "Hour", "y": "", "color": "Avg revenue ($)"},
+            title="Average revenue by day and hour (darker = busier)",
+        )
+        st.plotly_chart(fig, width="stretch")
+    else:
+        st.info("Your file has dates but no times, so we can't show busy hours. "
+                "Export a report that includes the time of each sale to see them.")
 
     by_day = analysis.revenue_by_weekday(df).reset_index()
     fig = px.bar(by_day, x="weekday", y="total",
@@ -127,16 +184,23 @@ with tab_trends:
                   title="Weekly revenue")
     st.plotly_chart(fig, width="stretch")
 
-    trends = analysis.product_trends(df).reset_index()
-    trends["direction"] = trends["change_pct"].apply(
-        lambda x: "Growing" if x > 0 else "Shrinking")
-    fig = px.bar(
-        trends.sort_values("change_pct"),
-        x="change_pct", y="product", orientation="h", color="direction",
-        color_discrete_map={"Growing": "#2e9e5b", "Shrinking": "#d64545"},
-        labels={"change_pct": "Change in units sold (%)", "product": "",
-                "direction": ""},
-        title="Product trends: last 4 weeks vs. first 4 weeks",
-    )
-    fig.update_layout(height=500)
-    st.plotly_chart(fig, width="stretch")
+    trends = analysis.product_trends(df)
+    if trends.empty:
+        st.info("Product trends need at least 8 weeks of sales: we compare your "
+                "first 4 weeks with your most recent 4.")
+    else:
+        # Show the 10 biggest movers in each direction so the chart stays readable.
+        trends = trends.rename_axis("product").reset_index()
+        movers = pd.concat([trends.head(10), trends.tail(10)]).drop_duplicates("product")
+        movers["direction"] = movers["change_pct"].apply(
+            lambda x: "Growing" if x > 0 else "Shrinking")
+        fig = px.bar(
+            movers.sort_values("change_pct"),
+            x="change_pct", y="product", orientation="h", color="direction",
+            color_discrete_map={"Growing": "#2e9e5b", "Shrinking": "#d64545"},
+            labels={"change_pct": "Change in units sold (%)", "product": "",
+                    "direction": ""},
+            title="Biggest movers: last 4 weeks vs. first 4 weeks",
+        )
+        fig.update_layout(height=max(300, 32 * len(movers)))
+        st.plotly_chart(fig, width="stretch")

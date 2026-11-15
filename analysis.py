@@ -4,40 +4,20 @@ analysis.py
 The "brain" of the Sales Insights app. Each function takes the sales data
 (a pandas DataFrame) and answers one business question.
 
-The Streamlit app (coming next) will call these functions and display
-the results. Keeping the analysis separate from the app makes it easier
-to test and to reuse.
+The data comes in already cleaned by loader.py, which turns any sales export
+into the same standard columns: transaction_id, datetime, product, category,
+quantity, total (plus helper columns date, hour, weekday).
+
+The Streamlit app calls these functions and displays the results. Keeping
+the analysis separate from the app makes it easier to test and to reuse.
 """
 
 import pandas as pd
 
-# The columns we need in an uploaded sales file.
-REQUIRED_COLUMNS = ["transaction_id", "datetime", "product", "quantity", "total"]
+from loader import has_time_of_day
 
 DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday",
              "Friday", "Saturday", "Sunday"]
-
-
-# ---------------------------------------------------------------------------
-# Loading
-# ---------------------------------------------------------------------------
-def load_sales(file):
-    """Read a sales CSV and make sure it has what we need.
-
-    `file` can be a file path or an uploaded file from Streamlit.
-    """
-    df = pd.read_csv(file)
-
-    missing = [col for col in REQUIRED_COLUMNS if col not in df.columns]
-    if missing:
-        raise ValueError(f"Your file is missing these columns: {', '.join(missing)}")
-
-    # Turn the text dates into real dates so we can group by day, hour, week.
-    df["datetime"] = pd.to_datetime(df["datetime"])
-    df["date"] = df["datetime"].dt.date
-    df["hour"] = df["datetime"].dt.hour
-    df["weekday"] = df["datetime"].dt.day_name()
-    return df
 
 
 # ---------------------------------------------------------------------------
@@ -105,19 +85,26 @@ def weekly_revenue(df):
     return df.set_index("datetime")["total"].resample("W").sum()
 
 
-def product_trends(df, weeks=4):
+def product_trends(df, weeks=4, min_units=10):
     """Compare each product's units sold in the first vs. the last few weeks.
 
     Returns the percent change, so +80 means "selling 80% more than before".
+    Returns an empty table if there isn't enough history to compare
+    (we need at least two separate `weeks`-long windows). Products that sold
+    fewer than `min_units` early on are left out, because tiny numbers make
+    misleading percentages (going from 1 sale to 3 is not "+200% growth").
     """
     start = df["datetime"].min()
     end = df["datetime"].max()
     window = pd.Timedelta(weeks=weeks)
+    if end - start < 2 * window:
+        return pd.DataFrame(columns=["early_units", "recent_units", "change_pct"])
 
     early = df[df["datetime"] < start + window].groupby("product")["quantity"].sum()
     late = df[df["datetime"] > end - window].groupby("product")["quantity"].sum()
 
     trends = pd.DataFrame({"early_units": early, "recent_units": late}).fillna(0)
+    trends = trends[trends["early_units"] >= min_units]
     trends["change_pct"] = (
         (trends["recent_units"] - trends["early_units"]) / trends["early_units"] * 100
     )
@@ -146,27 +133,39 @@ def generate_insights(df):
         f"Never let them run out."
     )
 
-    # Busiest day
-    by_day = revenue_by_weekday(df)
-    best_day, worst_day = by_day.idxmax(), by_day.idxmin()
-    diff = (by_day.max() / by_day.min() - 1) * 100
-    insights.append(
-        f"📅 **{best_day}** is your busiest day, making {diff:.0f}% more than "
-        f"{worst_day}, your slowest day."
-    )
+    # Busiest day (only makes sense if the data covers several weekdays)
+    by_day = revenue_by_weekday(df).dropna()
+    if len(by_day) >= 2 and by_day.min() > 0:
+        best_day, worst_day = by_day.idxmax(), by_day.idxmin()
+        diff = (by_day.max() / by_day.min() - 1) * 100
+        insights.append(
+            f"📅 **{best_day}** is your busiest day, making {diff:.0f}% more than "
+            f"{worst_day}, your slowest day."
+        )
 
-    # Peak hours: the 3-hour stretch with the most revenue
-    by_hour = df.groupby("hour")["total"].sum()
-    rolling = by_hour.rolling(3).sum()
-    end_hour = int(rolling.idxmax())
-    peak_share = rolling.max() / by_hour.sum() * 100
-    insights.append(
-        f"⏰ Your rush is **{_fmt_hour(end_hour - 2)}–{_fmt_hour(end_hour + 1)}**, "
-        f"which brings in {peak_share:.0f}% of daily revenue. Schedule extra staff then."
-    )
+    # Peak hours: the 3-hour stretch with the most revenue.
+    # Skipped when the file only has dates, not times.
+    if has_time_of_day(df):
+        by_hour = df.groupby("hour")["total"].sum()
+        # Fill in hours with no sales as 0 so "3 hours in a row" really means that.
+        by_hour = by_hour.reindex(range(by_hour.index.min(), by_hour.index.max() + 1),
+                                  fill_value=0)
+        rolling = by_hour.rolling(3, min_periods=1).sum()
+        end_hour = int(rolling.idxmax())
+        start_hour = max(end_hour - 2, by_hour.index.min())
+        peak_share = rolling.max() / by_hour.sum() * 100
+        insights.append(
+            f"⏰ Your rush is **{_fmt_hour(start_hour)}–{_fmt_hour(end_hour + 1)}**, "
+            f"which brings in {peak_share:.0f}% of daily revenue. "
+            f"Schedule extra staff then."
+        )
 
     # Fastest growing and fastest declining products
     trends = product_trends(df)
+    if trends.empty:
+        insights.append("⏳ Upload at least 8 weeks of sales to see which products "
+                        "are growing or fading.")
+        return insights
     rising, falling = trends.index[0], trends.index[-1]
     if trends.loc[rising, "change_pct"] > 15:
         insights.append(
@@ -193,6 +192,8 @@ def _fmt_hour(hour):
 # Quick test: run this file directly to see the insights in the terminal.
 # ---------------------------------------------------------------------------
 if __name__ == "__main__":
+    from loader import load_sales
+
     data = load_sales("sample_cafe_sales.csv")
     m = summary_metrics(data)
     print(f"Revenue: ${m['revenue']:,.0f} | Sales: {m['transactions']:,} | "

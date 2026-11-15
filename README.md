@@ -36,21 +36,24 @@ The app opens in your browser with demo data from a fictional café. Upload your
 
 ### Using your own data
 
-Your CSV needs these columns:
+Upload a sales export straight from your point-of-sale system. No reformatting needed. The app recognizes the column names used by **Square**, **Shopify**, **Clover** and most other systems, and shows its guesses so you can correct any it gets wrong.
 
-| Column | Example |
+It needs, at minimum:
+
+| Information | Example column names it recognizes |
 |---|---|
-| `transaction_id` | 100245 |
-| `datetime` | 2026-05-01 08:42:00 |
-| `product` | Latte |
-| `quantity` | 1 |
-| `total` | 5.25 |
+| **Date** (with or without time) | `Date`, `Created at`, `Order Date`, `datetime` |
+| **Product** | `Item`, `Product`, `Lineitem name`, `Description` |
+| **Money** (line total or unit price) | `Net Sales`, `Total`, `Amount`, `Lineitem price` |
+
+Optional extras make the results better: **time of day** (for busy-hour charts), **quantity**, **order/transaction ID** (for accurate average sale size) and **category**. It also handles money written as text (`$1,234.50`, `(5.00)` for refunds), separate date and time columns, time zones and unreadable rows.
 
 ## Project structure
 
 | File | Purpose |
 |---|---|
 | `app.py` | The Streamlit web app (layout and charts) |
+| `loader.py` | Reads any sales export: detects which column is which, cleans money and dates, fills in what's missing |
 | `analysis.py` | All analysis logic, kept separate from the app so it's easy to test and reuse |
 | `generate_sample_data.py` | Creates a realistic synthetic dataset with planted trends to validate the analysis |
 | `sample_cafe_sales.csv` | 6 months of synthetic café sales (~26,500 transactions) |
@@ -58,6 +61,8 @@ Your CSV needs these columns:
 ## How I validated it
 
 The demo dataset is generated with known patterns built in: a morning rush, busier weekends, one product steadily growing and one declining. The analysis detects all of them without being told about them, which confirms the logic works before it's used on real data.
+
+To test the file loader, the same sales were re-exported in Square-style and Shopify-style formats (different column names, money as text, time zones, order-level totals). All of them produce identical results to the original data.
 
 ## What's next
 
