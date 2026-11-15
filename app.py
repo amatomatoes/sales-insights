@@ -100,10 +100,51 @@ except Exception:
     st.stop()
 
 has_time = loader.has_time_of_day(df)
+all_sales = df  # keep the full data; `df` becomes the filtered view below
+
+# ---------------------------------------------------------------------------
+# Step 4: filters in the sidebar (date range and categories)
+# ---------------------------------------------------------------------------
+first_day, last_day = all_sales["date"].min(), all_sales["date"].max()
+with st.sidebar:
+    st.header("Filters")
+    picked = st.date_input(
+        "Date range", value=(first_day, last_day),
+        min_value=first_day, max_value=last_day, key=f"{file_key}-dates",
+    )
+    # While the owner is picking, the calendar briefly returns just one date.
+    if isinstance(picked, (tuple, list)) and len(picked) == 2:
+        start_date, end_date = picked
+    else:
+        start_date, end_date = first_day, last_day
+        st.caption("Pick an end date to apply the range.")
+
+    all_categories = sorted(all_sales["category"].unique())
+    chosen_categories = None
+    if len(all_categories) > 1:  # no point filtering if there's only one
+        chosen_categories = st.multiselect(
+            "Categories", all_categories, placeholder="All categories",
+            key=f"{file_key}-categories",
+        )
+
+df = analysis.filter_sales(all_sales, start_date, end_date, chosen_categories)
+if df.empty:
+    st.warning("No sales match these filters. Try a wider date range or "
+               "different categories.")
+    st.stop()
 
 metrics = analysis.summary_metrics(df)
-st.info(f"Showing **{source}** from {metrics['first_date']:%b %d, %Y} "
-        f"to {metrics['last_date']:%b %d, %Y}.")
+banner = (f"Showing **{source}** from {metrics['first_date']:%b %d, %Y} "
+          f"to {metrics['last_date']:%b %d, %Y}")
+if chosen_categories:
+    banner += f", categories: **{', '.join(chosen_categories)}**"
+if len(df) < len(all_sales):
+    share = len(df) / len(all_sales)
+    banner += " (less than 1% of your data)" if share < 0.01 else f" ({share:.0%} of your data)"
+st.info(banner + ".")
+if chosen_categories:
+    st.caption("ℹ️ With categories selected, 'Number of sales' counts sales that "
+               "included those items, and 'Average sale' adds up only those items.")
 for note in notes:
     st.caption(f"ℹ️ {note}")
 
@@ -186,8 +227,9 @@ with tab_trends:
 
     trends = analysis.product_trends(df)
     if trends.empty:
-        st.info("Product trends need at least 8 weeks of sales: we compare your "
-                "first 4 weeks with your most recent 4.")
+        st.info("Product trends need at least 8 weeks of sales: we compare the "
+                "first 4 weeks with the most recent 4. Upload more history or "
+                "widen the date range.")
     else:
         # Show the 10 biggest movers in each direction so the chart stays readable.
         trends = trends.rename_axis("product").reset_index()

@@ -21,6 +21,24 @@ DAY_ORDER = ["Monday", "Tuesday", "Wednesday", "Thursday",
 
 
 # ---------------------------------------------------------------------------
+# Filtering: zoom in on a date range or certain categories
+# ---------------------------------------------------------------------------
+def filter_sales(df, start_date=None, end_date=None, categories=None):
+    """Keep only sales between two dates (inclusive) and in the chosen categories.
+
+    Any filter left as None is ignored, so filter_sales(df) returns everything.
+    """
+    keep = pd.Series(True, index=df.index)
+    if start_date is not None:
+        keep &= df["date"] >= start_date
+    if end_date is not None:
+        keep &= df["date"] <= end_date
+    if categories:
+        keep &= df["category"].isin(categories)
+    return df[keep]
+
+
+# ---------------------------------------------------------------------------
 # Question 1: How is the business doing overall?
 # ---------------------------------------------------------------------------
 def summary_metrics(df):
@@ -163,8 +181,8 @@ def generate_insights(df):
     # Fastest growing and fastest declining products
     trends = product_trends(df)
     if trends.empty:
-        insights.append("⏳ Upload at least 8 weeks of sales to see which products "
-                        "are growing or fading.")
+        insights.append("⏳ Growing and fading products need at least 8 weeks of "
+                        "sales. Upload more history or widen the date range.")
         return insights
     rising, falling = trends.index[0], trends.index[-1]
     if trends.loc[rising, "change_pct"] > 15:

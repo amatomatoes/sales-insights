@@ -16,6 +16,7 @@ Most small shops and cafés have months of sales data sitting in their point-of-
 - **Product performance:** revenue ranking and each product's share of sales
 - **Busy-times heatmap:** average revenue by day of the week and hour
 - **Trends:** weekly revenue and which products are growing or shrinking
+- **Filters:** zoom in on any date range or product category, and every number, insight and chart updates
 
 ## Built with
 
